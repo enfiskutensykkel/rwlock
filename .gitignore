@@ -1,0 +1,5 @@
+*.o
+.*.swp
+*.txt
+jonas_rw
+posix_rw
