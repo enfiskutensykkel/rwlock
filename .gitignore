@@ -1,5 +1,5 @@
 *.o
 .*.swp
 *.txt
-jonas_rw
+impl_rw
 posix_rw

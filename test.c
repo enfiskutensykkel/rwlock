@@ -124,11 +124,13 @@ static void reader(struct data* data)
             break;
         }
 
+#ifndef NDEBUG
         // Give away control in order to provoke bad behaviour
         // and then do some sanity checking incase our lock is 
         // not functionally correct.
         pthread_yield();
         assert(value == data->value);
+#endif
 
         // Update statistics
         stats->min = (elapsed < stats->min) ? elapsed : stats->min;
@@ -182,12 +184,14 @@ static void writer(struct data* data)
             break;
         }
 
+#ifndef NDEBUG
         // Give away control in order to provoke bad behaviour
         // and then do some sanity checking incase our lock is 
         // not functionally correct
         pthread_yield();
         assert(value == data->value);
         //assert(data->lock.num_readers == 0);
+#endif
 
         // Update value
         data->value++;
