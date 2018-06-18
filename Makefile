@@ -10,17 +10,18 @@ LIBS := pthread
 POSIX_OBJS = test.o posix.o
 MY_OBJS = test.o rwlock.o
 
-.PHONY: impl_rw posix_rw all clean
+#.PHONY: impl_rw posix_rw all clean
 
-all: impl_rw posix_rw
+#all: impl_rw posix_rw
+all: impl_rw
 
 clean:
 	-$(RM) $(POSIX_OBJS) $(MY_OBJS)
 	-$(RM) posix_rw impl_rw
 
 
-posix_rw: $(POSIX_OBJS)
-	$(CC) -o $@ $^ $(addprefix -l,$(LIBS)) 
+#posix_rw: $(POSIX_OBJS)
+#	$(CC) -o $@ $^ $(addprefix -l,$(LIBS)) 
 
 
 impl_rw: $(MY_OBJS)

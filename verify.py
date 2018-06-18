@@ -8,7 +8,7 @@ import numpy as np
 writer_acquire = re.compile(r'^\[(?P<thread>\d+)\] taking write lock')
 writer_release = re.compile(r'^\[(?P<thread>\d+)\] releasing write lock')
 
-reader_wait_expr = re.compile(r'^\[(?P<thread>\d+)\] taking read lock \(value=\d+, readers=\d+, waiting writers=\d+, waited=(?P<time>\d+)\)$')
+reader_wait_expr = re.compile(r'^\[(?P<thread>\d+)\] taking read lock \(waited=(?P<time>\d+)\)$')
 
 
 if len(sys.argv) != 2:

@@ -107,20 +107,22 @@ static void reader(struct data* data)
 
     while (1) {
         uint64_t before = get_ns();
-        rwlock_lock_rd(&data->lock);
+        rwlock_lock_rd(&data->lock, self);
         uint64_t after = get_ns();
 
         uint64_t elapsed = after - before;
 
         uint64_t value = data->value;
-        fprintf(stderr, "[%03u] taking read lock (value=%lu, readers=%u, waiting writers=%u, waited=%lu)\n", 
-                self, value, data->lock.num_readers, data->lock.blocked_writers, elapsed);
+//        fprintf(stderr, "[%03u] taking read lock (value=%lu, readers=%u, waiting writers=%u, waited=%lu)\n", 
+//                self, value, data->lock.num_readers, data->lock.blocked_writers, elapsed);
+        fprintf(stderr, "[%03u] taking read lock (waited=%lu)\n", self, elapsed);
 
         // Are we there yet?
         if (value == data->target) {
-            fprintf(stderr, "[%03u] releasing read lock (readers=%u)\n", 
-                    self, data->lock.num_readers);
-            rwlock_unlock_rd(&data->lock);
+//            fprintf(stderr, "[%03u] releasing read lock (readers=%u)\n", 
+//                    self, data->lock.num_readers);
+            fprintf(stderr, "[%03u] releasing read lock\n", self);
+            rwlock_unlock_rd(&data->lock, self);
             break;
         }
 
@@ -139,10 +141,11 @@ static void reader(struct data* data)
         stats->held++;
 
         // Holding the read-lock only affects writers
-        fprintf(stderr, "[%03u] releasing read lock (readers=%u)\n", 
-                self, data->lock.num_readers);
+//        fprintf(stderr, "[%03u] releasing read lock (readers=%u)\n", 
+//                self, data->lock.num_readers);
+        fprintf(stderr, "[%03u] releasing read lock\n", self);
 
-        rwlock_unlock_rd(&data->lock);
+        rwlock_unlock_rd(&data->lock, self);
 
         pretend_to_work(data->read_sleep);
     }
@@ -175,8 +178,9 @@ static void writer(struct data* data)
         uint64_t value = data->value;
 
         uint64_t elapsed = after - before;
-        fprintf(stderr, "[%03u] taking write lock (value=%lu, readers=%u, waiting writers=%u, waited=%lu)\n", 
-                self, value, data->lock.num_readers, data->lock.blocked_writers, elapsed);
+//        fprintf(stderr, "[%03u] taking write lock (value=%lu, readers=%u, waiting writers=%u, waited=%lu)\n", 
+//                self, value, data->lock.num_readers, data->lock.blocked_writers, elapsed);
+        fprintf(stderr, "[%03u] taking write lock (waited=%lu)\n", self, elapsed);
 
         // Are we there yet?
         if (value == data->target) {
@@ -226,7 +230,7 @@ int main()
         abort();
     }
 
-    rwlock_init(&data->lock);
+    rwlock_init(&data->lock, num_workers);
     data->target = NUM_UPDATES;
     data->value = 0;
     data->read_sleep = SLEEP_READ;
