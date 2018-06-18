@@ -12,7 +12,8 @@
 typedef struct {
     pthread_rwlock_t    rwlock; // Used only by posix.c for comparison, not part of my own implementation
 
-    pthread_spinlock_t  read_lock;  // Ensure exclusive access among readers
+    //pthread_spinlock_t  read_lock;  // Ensure exclusive access among readers
+    pthread_mutex_t  read_lock;  // Ensure exclusive access among readers
     pthread_mutex_t     write_lock; // Ensure exclusive access among writers
     sem_t               read_sem;   // Read-ownership
     sem_t               write_sem;  // Write-ownership

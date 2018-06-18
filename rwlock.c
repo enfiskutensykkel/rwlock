@@ -7,7 +7,8 @@
 
 void rwlock_init(rwlock_t* lock)
 {
-    pthread_spin_init(&lock->read_lock, PTHREAD_PROCESS_PRIVATE);
+    //pthread_spin_init(&lock->read_lock, PTHREAD_PROCESS_PRIVATE);
+    pthread_mutex_init(&lock->read_lock, NULL);
     pthread_mutex_init(&lock->write_lock, NULL);
 
     sem_init(&lock->read_sem, 0, 1);
@@ -23,16 +24,20 @@ void rwlock_uninit(rwlock_t* lock)
     sem_destroy(&lock->write_sem);
     sem_destroy(&lock->read_sem);
     pthread_mutex_destroy(&lock->write_lock);
-    pthread_spin_destroy(&lock->read_lock);
+    pthread_mutex_destroy(&lock->read_lock);
+    //pthread_spin_destroy(&lock->read_lock);
 }
 
 
 void rwlock_lock_rd(rwlock_t* lock)
 {
+    // Block out writers or wait for writers to release
+    // the lock.
     sem_wait(&lock->read_sem);
 
     // Prevent race-condition with other readers
-    pthread_spin_lock(&lock->read_lock);
+    //pthread_spin_lock(&lock->read_lock);
+    pthread_mutex_lock(&lock->read_lock);
 
     // If we are the first reader, take write-ownership to 
     // prevent writers from writing while we are reading
@@ -40,7 +45,8 @@ void rwlock_lock_rd(rwlock_t* lock)
         sem_wait(&lock->write_sem);
     }
 
-    pthread_spin_unlock(&lock->read_lock);
+    //pthread_spin_unlock(&lock->read_lock);
+    pthread_mutex_unlock(&lock->read_lock);
 
     sem_post(&lock->read_sem);
 }
@@ -49,7 +55,8 @@ void rwlock_lock_rd(rwlock_t* lock)
 void rwlock_unlock_rd(rwlock_t* lock)
 {
     // Prevent race condition with other readers
-    pthread_spin_lock(&lock->read_lock);
+    //pthread_spin_lock(&lock->read_lock);
+    pthread_mutex_lock(&lock->read_lock);
     
     lock->num_readers--;
 
@@ -59,7 +66,8 @@ void rwlock_unlock_rd(rwlock_t* lock)
         sem_post(&lock->write_sem);
     }
 
-    pthread_spin_unlock(&lock->read_lock);
+    //pthread_spin_unlock(&lock->read_lock);
+    pthread_mutex_unlock(&lock->read_lock);
 }
 
 
