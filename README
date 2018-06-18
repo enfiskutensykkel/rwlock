@@ -1,128 +1,96 @@
 
+*Approach:*
 
-How to build:
+I started out by making a test program (test.c) that starts NUM_WRITERS writer
+threads and NUM_READERS reader threads. Writers take the write lock and
+increment a variable (until NUM_UPDATES), and readers simply check if the
+variable has reached NUM_UPDATES yet. When holding the r/w lock, both kind of
+threads write to stderr whether they have just taken the lock or released it.
+I also measure the time spent waiting for the lock.
+
+I first implemented the rwlock_* API as a wrapper to pthread_rwlock_*
+functions (posix.c) . This was to get a baseline comparison of performance. 
+The POSIX variant supports both writer-preferring and read-preferring locking
+depending on the attributes, which was handy for comparing starvation as well 
+as read-locking performance.
+
+Verifying that my own implementation (rwlock.c) was correct was done by piping
+stderr to file, and then using a python script (verify.py) that simply checks
+that the write lock is taken and released immediately after, with no other
+locking output in between. I've also used asserts in the C code to check that
+the lock's state is sane, and I experimented with using pthread_yield() in the
+reader and writer threads in order to provoke race conditions that might not
+otherwise occur. It appears to me that the lock is working as intended.
+To verify that multiple readers are able to hold the read lock at the same
+time, I print out the number of concurrent readers in the locking output.
+
+The test program outputs some statistics to stdout as well, such as how many
+times a thread was able to take the lock, the minimum and maximum amount of 
+time it spent waiting for the lock, and the average time it spent waiting.
+To my surprise, the average time was quite high for my own implementation
+compared to the write-preferring pthread implementation. At first I spent a
+great deal of time trying to understand where my own code was slow, and trying
+to use spinlocks instead of mutexes and condition variables. I added the time
+time spent waiting for lock to the stderr printing, and by parsing the file and
+printing the percentiles rather than arithmetic mean, it appears to (almost) as
+fast as the pthread implementation for 99th percentile, but there is some
+maximum time that skews the mean. I spent a good deal of time tracking down the
+source for this and experimenting with different kinds of optimization
+(including an alternative implementation using four semaphores rather than 
+condition variables), so I will admit that I spent 5-6 hours on the programming 
+part rather than the estimated 4 hours. I landed on the current "simple"
+implementation, because it is good enough for the 99th percentile and the code
+is a lot cleaner and more readable this way.
+
+In order to test writer starvation, I added the possibility to set NUM_READERS
+and NUM_WRITERS in the Makefile, along with tweaking of how long threads of
+each kind should sleep (in order to adjust frequency of writing). On my
+computer, writer-starvation is easily observed when the pthread implementation
+uses read-preferring locking and number of writers is
+few and the number of readers is more than 16 (number of CPUs * 2, because
+of what I assume is due to hyperthreading). For 32 or more threads (on my
+computer), the reader-preferring pthread-variant is so starved that I think
+that it never runs to completion. My own writer-preferring implementation,
+works and runs to completion.
+
+
+*Implementation:*
+
+The test program code is in test.c, and the r/w lock implementation is in
+rwlock.c . As mentioned, I also made a wrapper for POSIX r/w locks in posix.c
+The Python2 script that verifies functional correctness is verify.py (using
+numpy for some stats).
+
+My lock is implemented as a monitor (using a pthread_mutex_t in order to ensure
+exclusiveness). I have two condition variables, one is used to signal waiting
+writers that the lock is ready, and the other is used to signal readers that
+might try to enter while the write-lock is being held. I have three counters,
+num_readers, num_writers and blocked_writers. The blocked_writers is used to
+indicate to readers that there are writers waiting for the lock, so new readers
+will wait for the signal. Only one reader can be active at the time, so new
+writers also have to wait for the current active writer to complete. Active
+writers have to wait for any active readers to complete, and the last reader
+signals a blocked writer.
+
+My lock is, as mentioned, writer-preferring, so I assume that writing will be
+infrequent as I always prioritize writers over readers.
+
+
+*Building:*
  0) The code is written as C99/GNU99, and I rely on GNU version of POSIX for
     pthread_yield().
  
  1) Edit appropriate defines in Makefile. Note that for a high number of
     readers, the posix-variant may not run to completion (due to writer
-    starvation).
+    starvation), so you might have to change the attributes in posix.c.
+    Also remember to do a make clean first.
 
- 2) run `make all', this builds both my implementation of the rwlock as well as
-    wrapper for pthread_rwlock_t.
+ 2) Run make all, this builds both my implementation of the rwlock as well as
+    wrapper for pthread_rwlock_t. The binaries are impl_rw (my implementation)
+    and posix_rw (using pthreads). 
 
-How to run:
-    Run either impl_rw (my implementation) or posix_rw (wrapper for
-    pthread_rwlock_t). I output lock-taking to stderr, so you probably want to
-    pipe this to a file.
+You probably want to pipe stderr to file, as the output will be a bit excessive.
 
-    The files created by piping to stderr can be used as input to the
-    verify.py script, which checks that every write-lock taking is immediately
-    followed by a single write-lock release. This /should/ show that my
-    implementation satisfies the following:
-        - only a single writer at the time
-	- no readers have access while the write-lock is held
-
-    I also print the number of currently active readers to stderr, in order to
-    show that multiple concurrent readers can hold the read-lock
-    simultaneously.
-
-    The output to stdout is on the following format
-    [threadnumber] held=<number of times the r/w lock was held>, min=<minimum number of nanoseconds spent waiting for the lock>, max=<maximum number of ns waiting for the lock>, avg=<average ns spent waiting for the lock>
-
-
-Files:
- Makefile   - build receipies as well as parameters to the program
-
- test.c     - Test program, creating NUM_READER readers and NUM_WRITER writers 
-              that take read/write locks and update some statistics.
-
- rwlock.h   - API signatures and rwlock_t struct definition.
-
- rwlock.c   - My implementation of read-write lock using semaphores, spinlocks
-              and mutexes.
-
- posix.c    - Wrappers for calling pthread_rwlock_* related functions. Used by
-              the comparison program.
-
- verify.py  - Pythons script that verifies functional correctness (at least I
-              argue that it does) based on output from the test program (via
-	      piped file).
-
-
-Design:
-    The read-write lock is first and foremost implemented in a way that aims to
-    prevent writer-starvation, in other words it prefers writers. 
-    Multiple readers can hold the read-lock simultaneously, and when one or 
-    more writer tries to take access, new/succeeding readers are blocked until 
-    the writers are done. I have no ordering of writers, but I rely on the
-    assumption that writing occurs infrequent. This can obviously lead to
-    bad read-performance in the case where this assumption doesn't hold true.
-
-    Single-writer ownership is ensured by holding the write_sem sempahore,
-    which is either done by a single writer at the time (the end of the
-    rwlock_lock_rw function) or by the first reader taking read-access.
-    I use a spinlock to prevent race-conditions between readers, and a mutex to
-    prevent race-conditions between writers.
-
-    My implementation of the locking API does not do any checking of return
-    values from the pthread functions, a real implementation would need to add
-    this.
-
-    The test program starts reader threads and worker threads. The workers take
-    the write-lock and increment a counter to a predetermined number (the
-    NUM_UPDATES define). Between locking attempts, it sleeps for a duration.
-    Readers take the read-lock and also sleeps. Note that the debug-build also
-    attempts to check whether the locking is functionally sound by calling
-    pthread_yield() and double-checking the value.
-
-    For few writers and few readers, pthread_rwlock_t has better performance
-    (as seen by the average waiting time outputted by the `posix_rw' program).
-    However, when the number of readers increase or the writer sleep interval
-    (SLEEP_WRITE) increase, the writers become starved and the program just 
-    churns without coming to completion.
-
-
-Approach:
-    I started out making the testing program (test.c) and the wrapper for
-    pthread_rwlock_* functions (posix.c). Then I started working on my own
-    implementation.
-
-    At first, I attempted to create a solution using a condition variable that
-    both readers and writers would wait on if there were any current writers.
-    I didn't get this to work as intended, and writers would easily get starved
-    when I turned up the number of reader threads.
-
-    Initially, I also used mutexes instead of semaphores for taking the
-    write-owner ship as the first reader, but this didn't work either as 
-    mutexes are owned by the locking thread. This is why I used semaphores
-    instead, they are not owned by a thread in the same sense and still provide
-    blocking. Due to some struggling with finding out the source of this
-    race-condition, I have to be honest and admit that the challenge took me 
-    somewhat more than 4 hours to complete (I estimate that I spent between 5-6
-    hours in total).
-
-    The readers use a spinlock rather than a mutex in an attempt to speed up
-    read-lock acquiring. The actual benefit of this is unknown, as readers
-    still have to wait for read-ownership by taking the read_sem semaphore
-    first. I would need to investigate further and plot the time spent waiting
-    on the lock in order to see some real difference.
-
-    As mentioned, for few threads, pthread_rwlock_t clearly outperforms my own
-    implementation (in terms of time spent waiting for the lock). However,
-    using my own version, you can adjust the sleep intervals and number of
-    reader threads without significantly affecting the overall runtime.
-    With the POSIX variant, the total running time increases drastically, and
-    for many reader threads, writers become completely starved and the program
-    never terminates.
-
-    During development I put a bunch of asserts around in order to ensure that
-    the lock worked as intended, but since the POSIX wrapper doesn't update the
-    same variables, I commented most of these out and instead used the
-    `verify.py' script to ensure that it remained functionally correct. I also
-    switched from trying to order both readers and writers, to allowing
-    multiple writers entering at the same time and instead relying on the
-    assumption (as stated in the challenge) that writes are infrequent. This
-    allows me to assume that reader-starvation is not a real problem.
-
+The output to stdout is on the following format
+[threadnumber] held=<number of times the r/w lock was held>, min=<minimum number of nanoseconds spent waiting for the lock>, max=<maximum number of ns waiting for the lock>, avg=<average ns spent waiting for the lock>
 

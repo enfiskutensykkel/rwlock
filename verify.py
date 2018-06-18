@@ -57,6 +57,8 @@ with open(sys.argv[1]) as fp:
 
 reads = np.array(all_read_times)
 
+print ".50:", np.percentile(reads, .50)
+print ".75:", np.percentile(reads, .75)
 print ".90:", np.percentile(reads, .90)
 print ".95:", np.percentile(reads, .95)
 print ".97:", np.percentile(reads, .97)

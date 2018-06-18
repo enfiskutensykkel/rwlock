@@ -3,8 +3,8 @@ DEFS := NUM_WRITERS=4 NUM_READERS=256 SLEEP_READ=100 SLEEP_WRITE=100000 NUM_UPDA
 
 
 CC := gcc
-#CFLAGS := -std=gnu99 -Wall -Wextra -O2 -DNDEBUG
-CFLAGS := -std=gnu99 -Wall -Wextra -O0 -g
+CFLAGS := -std=gnu99 -Wall -Wextra -O2 -DNDEBUG
+#CFLAGS := -std=gnu99 -Wall -Wextra -O0 -g
 LIBS := pthread
 
 POSIX_OBJS = test.o posix.o
