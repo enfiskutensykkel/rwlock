@@ -1,112 +1,114 @@
 #define _GNU_SOURCE
 #include <pthread.h>
-#include <semaphore.h>
 #include <assert.h>
 #include "rwlock.h"
 
 
+
 void rwlock_init(rwlock_t* lock)
 {
-    //pthread_spin_init(&lock->read_lock, PTHREAD_PROCESS_PRIVATE);
-    pthread_mutex_init(&lock->read_lock, NULL);
-    pthread_mutex_init(&lock->write_lock, NULL);
-
-    sem_init(&lock->read_sem, 0, 1);
-    sem_init(&lock->write_sem, 0, 1);
-
+    pthread_mutex_init(&lock->lock, NULL);
+    pthread_cond_init(&lock->writer_queue, NULL);
+    pthread_cond_init(&lock->read_signal, NULL);
     lock->num_writers = 0;
     lock->num_readers = 0;
+    lock->blocked_writers = 0;
 }
 
 
 void rwlock_uninit(rwlock_t* lock)
 {
-    sem_destroy(&lock->write_sem);
-    sem_destroy(&lock->read_sem);
-    pthread_mutex_destroy(&lock->write_lock);
-    pthread_mutex_destroy(&lock->read_lock);
-    //pthread_spin_destroy(&lock->read_lock);
+    assert(lock->num_readers == 0);
+    assert(lock->num_writers == 0);
+    assert(lock->blocked_writers == 0);
+
+    pthread_mutex_destroy(&lock->lock);
+    pthread_cond_destroy(&lock->writer_queue);
+    pthread_cond_destroy(&lock->read_signal);
 }
 
 
 void rwlock_lock_rd(rwlock_t* lock)
 {
-    // Block out writers or wait for writers to release
-    // the lock.
-    sem_wait(&lock->read_sem);
+    pthread_mutex_lock(&lock->lock);
 
-    // Prevent race-condition with other readers
-    //pthread_spin_lock(&lock->read_lock);
-    pthread_mutex_lock(&lock->read_lock);
-
-    // If we are the first reader, take write-ownership to 
-    // prevent writers from writing while we are reading
-    if (lock->num_readers++ == 0) {
-        sem_wait(&lock->write_sem);
+    // As writing is infrequent, always prioritize writers.
+    while (lock->blocked_writers > 0 || lock->num_writers > 0) {
+        pthread_cond_wait(&lock->read_signal, &lock->lock);
+//        pthread_mutex_unlock(&lock->lock);
+//
+//        pthread_yield();
+//
+//        pthread_mutex_lock(&lock->lock);
     }
 
-    //pthread_spin_unlock(&lock->read_lock);
-    pthread_mutex_unlock(&lock->read_lock);
+    lock->num_readers++;
 
-    sem_post(&lock->read_sem);
-}
+    pthread_mutex_unlock(&lock->lock);
 
-
-void rwlock_unlock_rd(rwlock_t* lock)
-{
-    // Prevent race condition with other readers
-    //pthread_spin_lock(&lock->read_lock);
-    pthread_mutex_lock(&lock->read_lock);
-    
-    lock->num_readers--;
-
-    // If we are the last reader, give back write-ownership so
-    // writers can take it.
-    if (lock->num_readers == 0) {
-        sem_post(&lock->write_sem);
-    }
-
-    //pthread_spin_unlock(&lock->read_lock);
-    pthread_mutex_unlock(&lock->read_lock);
+    assert(lock->num_writers == 0);
 }
 
 
 void rwlock_lock_wr(rwlock_t* lock)
 {
-    // Prevent race condition with other writers
-    pthread_mutex_lock(&lock->write_lock);
+    pthread_mutex_lock(&lock->lock);
 
-    // Are we the first writer? If we are, take read-ownership
-    // to prevent new readers from reading while we are reading
-    if (lock->num_writers++ == 0) {
-        sem_wait(&lock->read_sem);
+    // There can be no readers and only one writer at the time when writing
+    while (lock->num_readers > 0 || lock->num_writers > 0) {
+
+        // Signal that we are blocked from writing
+        lock->blocked_writers++;
+
+        pthread_cond_wait(&lock->writer_queue, &lock->lock);
+
+        // We are not blocked at the moment
+        lock->blocked_writers--;
     }
 
-    pthread_mutex_unlock(&lock->write_lock);
+    // Indicate that we are no longer blocked and "good to go"
+    lock->num_writers++;
 
-    // Take exclusive write access
-    sem_wait(&lock->write_sem);
+    pthread_mutex_unlock(&lock->lock);
 
     assert(lock->num_readers == 0);
+    assert(lock->num_writers == 1);
+}
 
+
+void rwlock_unlock_rd(rwlock_t* lock)
+{
+    pthread_mutex_lock(&lock->lock);
+
+    lock->num_readers--;
+
+    // Wake up a single blocked writer.
+    // There is no need to wake up more than one since there can
+    // be only one active writer at the time.
+    if (lock->num_readers == 0 && lock->blocked_writers > 0) {
+        pthread_cond_signal(&lock->writer_queue);
+    }
+
+    pthread_mutex_unlock(&lock->lock);
 }
 
 
 void rwlock_unlock_wr(rwlock_t* lock)
 {
-    // Release exclusive write access
-    sem_post(&lock->write_sem);
-
-    // Prevent race condition with other writers
-    pthread_mutex_lock(&lock->write_lock);
+    pthread_mutex_lock(&lock->lock);
 
     lock->num_writers--;
-    
-    // If we are the last writer, give back read-ownership
-    if (lock->num_writers == 0) {
-        sem_post(&lock->read_sem);
+    assert(lock->num_writers == 0);
+
+    // If there are any blocked writers, give them priority.
+    // Otherwise, wake up readers.
+    if (lock->blocked_writers > 0) {
+        pthread_cond_signal(&lock->writer_queue);
+    }
+    else {
+        pthread_cond_broadcast(&lock->read_signal);
     }
 
-    pthread_mutex_unlock(&lock->write_lock);
+    pthread_mutex_unlock(&lock->lock);
 }
 

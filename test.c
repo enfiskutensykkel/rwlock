@@ -112,11 +112,11 @@ static void reader(struct data* data)
 
         uint64_t elapsed = after - before;
 
-        fprintf(stderr, "[%03u] taking read lock (readers=%u, waiting writers=%u, waited=%lu)\n", 
-                self, data->lock.num_readers, data->lock.num_writers, elapsed);
+        uint64_t value = data->value;
+        fprintf(stderr, "[%03u] taking read lock (value=%lu, readers=%u, waiting writers=%u, waited=%lu)\n", 
+                self, value, data->lock.num_readers, data->lock.blocked_writers, elapsed);
 
         // Are we there yet?
-        uint64_t value = data->value;
         if (value == data->target) {
             fprintf(stderr, "[%03u] releasing read lock (readers=%u)\n", 
                     self, data->lock.num_readers);
@@ -170,14 +170,15 @@ static void writer(struct data* data)
         uint64_t after = get_ns();
 
         // Do some sanity checking
-        //assert(data->lock.num_readers == 0);
+        assert(data->lock.num_readers == 0);
+
+        uint64_t value = data->value;
 
         uint64_t elapsed = after - before;
-        fprintf(stderr, "[%03u] taking write lock (readers=%u, waiting writers=%u, waited=%lu)\n", 
-                self, data->lock.num_readers, data->lock.num_writers, elapsed);
+        fprintf(stderr, "[%03u] taking write lock (value=%lu, readers=%u, waiting writers=%u, waited=%lu)\n", 
+                self, value, data->lock.num_readers, data->lock.blocked_writers, elapsed);
 
         // Are we there yet?
-        uint64_t value = data->value;
         if (value == data->target) {
             fprintf(stderr, "[%03u] releasing write lock\n", self);
             rwlock_unlock_wr(&data->lock);
@@ -190,7 +191,7 @@ static void writer(struct data* data)
         // not functionally correct
         pthread_yield();
         assert(value == data->value);
-        //assert(data->lock.num_readers == 0);
+        assert(data->lock.num_readers == 0);
 #endif
 
         // Update value

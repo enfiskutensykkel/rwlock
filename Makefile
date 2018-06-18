@@ -1,23 +1,10 @@
 
-#### Many readers, few writers, infrequent writing
-#### posix soultion takes forever
-DEFS := NUM_WRITERS=8 NUM_READERS=256 SLEEP_READ=100 SLEEP_WRITE=100000 NUM_UPDATES=10000
-#DEFS := NUM_WRITERS=8 NUM_READERS=256 SLEEP_READ=100 SLEEP_WRITE=100000 NUM_UPDATES=1000
-
-#### Few readers, many writers, infrequent writing
-#DEFS := NUM_WRITERS=256 NUM_READERS=8 SLEEP_READ=10 SLEEP_WRITE=100000 NUM_UPDATES=1000
-
-#### Many readers, few writers, frequent writing
-#### posix solution takes forever
-#DEFS := NUM_WRITERS=8 NUM_READERS=256 SLEEP_READ=100000 SLEEP_WRITE=10 NUM_UPDATES=1000
-
-#### Few readers, few writers, frequent writing
-#DEFS := NUM_WRITERS=8 NUM_READERS=4 SLEEP_READ=100000 SLEEP_WRITE=10 NUM_UPDATES=1000
+DEFS := NUM_WRITERS=4 NUM_READERS=256 SLEEP_READ=100 SLEEP_WRITE=100000 NUM_UPDATES=10000
 
 
 CC := gcc
-CFLAGS := -std=gnu99 -Wall -Wextra -O2 -DNDEBUG
-#CFLAGS := -std=gnu99 -Wall -Wextra -O0 -g
+#CFLAGS := -std=gnu99 -Wall -Wextra -O2 -DNDEBUG
+CFLAGS := -std=gnu99 -Wall -Wextra -O0 -g
 LIBS := pthread
 
 POSIX_OBJS = test.o posix.o
