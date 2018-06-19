@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <pthread.h>
 #include <sched.h>
 #include <stdlib.h>
@@ -60,7 +61,11 @@ void rwlock_lock_rd(rwlock_t* lock, uint32_t thread)
             // Microoptimization for test-test and set, there is no need trying again
             // if we haven't seen a change in the flag
             while (lock->writer_flag == WRITE_LOCK_LOCKED) {
+#ifdef __APPLE__
                 sched_yield();
+#else
+                pthread_yield();
+#endif
             }
 
             // Indicate that we are trying to take lock again
@@ -82,7 +87,11 @@ void rwlock_lock_wr(rwlock_t* lock)
     while (lock->writer_flag == WRITE_LOCK_LOCKED) {
         pthread_mutex_unlock(&lock->lock);
 
-        sched_yield();
+#ifdef __APPLE__
+                sched_yield();
+#else
+                pthread_yield();
+#endif
 
         pthread_mutex_lock(&lock->lock);
     }
@@ -108,7 +117,11 @@ void rwlock_lock_wr(rwlock_t* lock)
             break;
         }
         else {
-            sched_yield();
+#ifdef __APPLE__
+                sched_yield();
+#else
+                pthread_yield();
+#endif
         }
     }
 }

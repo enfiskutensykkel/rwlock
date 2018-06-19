@@ -72,6 +72,6 @@ print "Reader threads:", len(readers)
 print "Writer threads:", len(writers)
 
 print "min :", "%14.3f" % np.min(reads)
-for percentile in [.5, .25, .50, .75, .90, .95, .97, .99]:
+for percentile in [.05, .10, .25, .50, .75, .90, .95, .97, .99]:
     print "%4.2f:" % percentile, "%14.3f" % np.percentile(reads, percentile)
 print "max :", "%14.3f" % np.max(reads)
