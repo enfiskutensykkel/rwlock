@@ -1,5 +1,5 @@
 *.o
 .*.swp
-*.txt
-impl_rw
-posix_rw
+optimized_test
+posix_test
+wrpref_test

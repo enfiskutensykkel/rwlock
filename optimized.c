@@ -1,8 +1,8 @@
-#define _GNU_SOURCE
 #include <pthread.h>
+#include <sched.h>
 #include <stdlib.h>
-#include <assert.h>
 #include "rwlock.h"
+#include "optimized.h"
 
 
 enum reader_states
@@ -13,7 +13,7 @@ enum reader_states
     READER_ACTIVE   = 3         // Reader thinks he has read-lock
 };
 
-enum writer_states
+enum writer_lock_states
 {
     WRITE_LOCK_UNLOCKED = 0,    // Write-lock is not used
     WRITE_LOCK_LOCKED   = 1     // Write-lock is used
@@ -22,12 +22,13 @@ enum writer_states
 
 void rwlock_init(rwlock_t* lock, uint32_t num_threads)
 {
-    pthread_spin_init(&lock->lock, PTHREAD_PROCESS_PRIVATE);
+    // FIXME: Should check error codes
+    pthread_mutex_init(&lock->lock, NULL);
     lock->num_threads = num_threads;
-    lock->reader_flags = calloc(num_threads, sizeof(int));
+    lock->reader_states = calloc(num_threads, sizeof(int));
     
     for (uint32_t i = 0; i < num_threads; ++i) {
-        lock->reader_flags[i] = READER_INACTIVE;
+        lock->reader_states[i] = READER_INACTIVE;
     }
 
     lock->writer_flag = WRITE_LOCK_UNLOCKED;
@@ -36,59 +37,59 @@ void rwlock_init(rwlock_t* lock, uint32_t num_threads)
 
 void rwlock_uninit(rwlock_t* lock)
 {
-    pthread_spin_destroy(&lock->lock);
-    free((void*) lock->reader_flags);
+    pthread_mutex_destroy(&lock->lock);
+    free((void*) lock->reader_states);
 }
 
 
 void rwlock_lock_rd(rwlock_t* lock, uint32_t thread)
 {
     // Indicate that we are attempting to take the lock
-    lock->reader_flags[thread] = READER_TAKING;
+    lock->reader_states[thread] = READER_TAKING;
 
-    pthread_spin_lock(&lock->lock);
+    pthread_mutex_lock(&lock->lock);
     if (lock->writer_flag == WRITE_LOCK_LOCKED) {
         // Microoptimization as starting a while loop has a bigger overhead
         // than a simple if-check
         while (lock->writer_flag == WRITE_LOCK_LOCKED) {
 
             // Write-lock was taken, we need to yield
-            pthread_spin_unlock(&lock->lock); // Lock first, allowing for others to take the lock
-            lock->reader_flags[thread] = READER_WAITING;
+            pthread_mutex_unlock(&lock->lock); // Lock first, allowing for others to take the lock
+            lock->reader_states[thread] = READER_WAITING;
 
             // Microoptimization for test-test and set, there is no need trying again
             // if we haven't seen a change in the flag
             while (lock->writer_flag == WRITE_LOCK_LOCKED) {
-                pthread_yield();
+                sched_yield();
             }
 
             // Indicate that we are trying to take lock again
-            lock->reader_flags[thread] = READER_TAKING;
-            pthread_spin_lock(&lock->lock);
+            lock->reader_states[thread] = READER_TAKING;
+            pthread_mutex_lock(&lock->lock);
         }
     }
-    pthread_spin_unlock(&lock->lock);
+    pthread_mutex_unlock(&lock->lock);
 
     // We got the lock
-    lock->reader_flags[thread] = READER_ACTIVE;
+    lock->reader_states[thread] = READER_ACTIVE;
 }
 
 
 void rwlock_lock_wr(rwlock_t* lock)
 {
     // Try to take write-lock, if not already taken
-    pthread_spin_lock(&lock->lock);
+    pthread_mutex_lock(&lock->lock);
     while (lock->writer_flag == WRITE_LOCK_LOCKED) {
-        pthread_spin_unlock(&lock->lock);
+        pthread_mutex_unlock(&lock->lock);
 
-        pthread_yield();
+        sched_yield();
 
-        pthread_spin_lock(&lock->lock);
+        pthread_mutex_lock(&lock->lock);
     }
     
     // Take the write-lock
     lock->writer_flag = WRITE_LOCK_LOCKED;
-    pthread_spin_unlock(&lock->lock);
+    pthread_mutex_unlock(&lock->lock);
 
     // Now we need to wait for existing readers to complete
     while (1) {
@@ -96,7 +97,7 @@ void rwlock_lock_wr(rwlock_t* lock)
 
         // Check if any readers think they have the lock or is about to take the lock
         for (i = 0; i < lock->num_threads; ++i) {
-            if (lock->reader_flags[i] == READER_TAKING || lock->reader_flags[i] == READER_ACTIVE) {
+            if (lock->reader_states[i] == READER_TAKING || lock->reader_states[i] == READER_ACTIVE) {
                 break;
             }
         }
@@ -107,7 +108,7 @@ void rwlock_lock_wr(rwlock_t* lock)
             break;
         }
         else {
-            pthread_yield();
+            sched_yield();
         }
     }
 }
@@ -116,7 +117,7 @@ void rwlock_lock_wr(rwlock_t* lock)
 void rwlock_unlock_rd(rwlock_t* lock, uint32_t thread)
 {
     // Indicate that we are no longer interested in the read-lock
-    lock->reader_flags[thread] = READER_INACTIVE;
+    lock->reader_states[thread] = READER_INACTIVE;
 }
 
 

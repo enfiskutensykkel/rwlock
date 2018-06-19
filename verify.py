@@ -57,10 +57,7 @@ with open(sys.argv[1]) as fp:
 
 reads = np.array(all_read_times)
 
-print ".50:", np.percentile(reads, .50)
-print ".75:", np.percentile(reads, .75)
-print ".90:", np.percentile(reads, .90)
-print ".95:", np.percentile(reads, .95)
-print ".97:", np.percentile(reads, .97)
-print ".99:", np.percentile(reads, .99)
-print "max:", np.max(reads)
+print "min :", "%14.3f" % np.min(reads)
+for percentile in [.5, .25, .50, .75, .90, .95, .97, .99]:
+    print "%4.2f:" % percentile, "%14.3f" % np.percentile(reads, percentile)
+print "max :", "%14.3f" % np.max(reads)

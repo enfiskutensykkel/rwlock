@@ -1,32 +1,39 @@
 
-DEFS := NUM_WRITERS=4 NUM_READERS=256 SLEEP_READ=100 SLEEP_WRITE=100000 NUM_UPDATES=10000
+# Should we test for correctness?
+TEST_FOR_CORRECTNESS := 1
 
+# Default values
+DEFS := NUM_WRITERS=1 NUM_READERS=64 SLEEP_READ=100 SLEEP_WRITE=100000 NUM_UPDATES=10000 CORRECTNESS=$(TEST_FOR_CORRECTNESS)
 
 CC := gcc
-CFLAGS := -std=gnu99 -Wall -Wextra -O2 -DNDEBUG
-#CFLAGS := -std=gnu99 -Wall -Wextra -O0 -g
-LIBS := pthread
+CFLAGS := -std=gnu99 -Wall -Wextra -Wno-unused-parameter
 
-POSIX_OBJS = test.o posix.o
-MY_OBJS = test.o rwlock.o
 
-#.PHONY: impl_rw posix_rw all clean
+.PHONY: wrpref optimized posix all clean distclean debug release
 
-#all: impl_rw posix_rw
-all: impl_rw
+all: optimized posix wrpref
+
+debug: CFLAGS += -O0 -g
+debug: all
+
+release: CFLAGS += -O2 -DNDEBUG
+release: all
 
 clean:
-	-$(RM) $(POSIX_OBJS) $(MY_OBJS)
-	-$(RM) posix_rw impl_rw
+	-$(RM) wrpref.o posix.o optimized.o wrpref_test.o posix_test.o optimized_test.o
 
+distclean: clean
+	-$(RM) wrpref_test posix_test optimized_test
 
-#posix_rw: $(POSIX_OBJS)
-#	$(CC) -o $@ $^ $(addprefix -l,$(LIBS)) 
+optimized: optimized_test
 
+posix: posix_test
 
-impl_rw: $(MY_OBJS)
-	$(CC) -o $@ $^ $(addprefix -l,$(LIBS))
+wrpref: wrpref_test
 
+%_test: %.o 
+	$(CC) $(CFLAGS) $(addprefix -D,$(DEFS)) -D$@ -o $@.o test.c -c
+	$(CC) -o $@ $@.o $^ -pthread
 
-%.o: %.c
-	$(CC) $(CFLAGS) $(addprefix -D,$(DEFS)) -o $@ $< -c
+%.o: %.c %.h
+	$(CC) $(CFLAGS) -o $@ $< -c

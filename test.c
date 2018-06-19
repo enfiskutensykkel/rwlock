@@ -1,5 +1,5 @@
-#define _GNU_SOURCE
 #include <pthread.h>
+#include <sched.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -10,6 +10,16 @@
 #include <limits.h>
 #include <assert.h>
 #include "rwlock.h"
+
+#if defined(optimized_test)
+#include "optimized.h"
+#elif defined(posix_test)
+#include "posix.h"
+#elif defined(wrpref_test)
+#include "wrpref.h"
+#else
+#error "Unknown test case"
+#endif
 
 
 struct stats
@@ -101,7 +111,7 @@ static void reader(struct data* data)
 
     stats->min = ULONG_MAX; // Minimum delay waiting for lock
     stats->max = 0;         // Maximum delay waiting for lock
-    stats->acc = 0;
+    stats->acc = 0;         // Accumulated delay waiting for lock
     stats->held = 0;        // Number of times the read-lock was held
 
 
@@ -109,43 +119,42 @@ static void reader(struct data* data)
         uint64_t before = get_ns();
         rwlock_lock_rd(&data->lock, self);
         uint64_t after = get_ns();
-
         uint64_t elapsed = after - before;
 
-        uint64_t value = data->value;
-//        fprintf(stderr, "[%03u] taking read lock (value=%lu, readers=%u, waiting writers=%u, waited=%lu)\n", 
-//                self, value, data->lock.num_readers, data->lock.blocked_writers, elapsed);
+#if defined(CORRECTNESS) && CORRECTNESS
         fprintf(stderr, "[%03u] taking read lock (waited=%lu)\n", self, elapsed);
+#endif
 
         // Are we there yet?
+        uint64_t value = data->value;
         if (value == data->target) {
-//            fprintf(stderr, "[%03u] releasing read lock (readers=%u)\n", 
-//                    self, data->lock.num_readers);
+#if defined(CORRECTNESS) && CORRECTNESS
             fprintf(stderr, "[%03u] releasing read lock\n", self);
+#endif
             rwlock_unlock_rd(&data->lock, self);
             break;
         }
 
-#ifndef NDEBUG
+#if defined(CORRECTNESS) && CORRECTNESS
         // Give away control in order to provoke bad behaviour
         // and then do some sanity checking incase our lock is 
         // not functionally correct.
-        pthread_yield();
+        sched_yield();
         assert(value == data->value);
 #endif
+
+#if defined(CORRECTNESS) && CORRECTNESS
+        fprintf(stderr, "[%03u] releasing read lock\n", self);
+#endif
+
+        // Holding the read-lock only affects writers
+        rwlock_unlock_rd(&data->lock, self);
 
         // Update statistics
         stats->min = (elapsed < stats->min) ? elapsed : stats->min;
         stats->max = (elapsed > stats->max) ? elapsed : stats->max;
         stats->acc += elapsed;
         stats->held++;
-
-        // Holding the read-lock only affects writers
-//        fprintf(stderr, "[%03u] releasing read lock (readers=%u)\n", 
-//                self, data->lock.num_readers);
-        fprintf(stderr, "[%03u] releasing read lock\n", self);
-
-        rwlock_unlock_rd(&data->lock, self);
 
         pretend_to_work(data->read_sleep);
     }
@@ -165,46 +174,46 @@ static void writer(struct data* data)
 
     stats->min = ULONG_MAX; // Minimum delay waiting for lock
     stats->max = 0;         // Maximum delay waiting for lock
+    stats->acc = 0;         // Accumulated delay waiting for lock
     stats->held = 0;        // Number of times the write-lock was held
     
     while (1) {
         uint64_t before = get_ns();
         rwlock_lock_wr(&data->lock);
         uint64_t after = get_ns();
-
-        // Do some sanity checking
-        assert(data->lock.num_readers == 0);
-
-        uint64_t value = data->value;
-
         uint64_t elapsed = after - before;
-//        fprintf(stderr, "[%03u] taking write lock (value=%lu, readers=%u, waiting writers=%u, waited=%lu)\n", 
-//                self, value, data->lock.num_readers, data->lock.blocked_writers, elapsed);
+
+#if defined(CORRECTNESS) && CORRECTNESS
         fprintf(stderr, "[%03u] taking write lock (waited=%lu)\n", self, elapsed);
+#endif
 
         // Are we there yet?
+        uint64_t value = data->value;
         if (value == data->target) {
+#if defined(CORRECTNESS) && CORRECTNESS
             fprintf(stderr, "[%03u] releasing write lock\n", self);
+#endif
             rwlock_unlock_wr(&data->lock);
             break;
         }
 
-#ifndef NDEBUG
+#if defined(CORRECTNESS) && CORRECTNESS
         // Give away control in order to provoke bad behaviour
         // and then do some sanity checking incase our lock is 
         // not functionally correct
-        pthread_yield();
+        sched_yield();
         assert(value == data->value);
-        assert(data->lock.num_readers == 0);
 #endif
 
         // Update value
         data->value++;
 
+#if defined(CORRECTNESS) && CORRECTNESS
+        fprintf(stderr, "[%03u] releasing write lock\n", self);
+#endif
+
         // Holding the write-lock is expensive (affects both readers 
         // and writers), so we should release it as soon as possible.
-        fprintf(stderr, "[%03u] releasing write lock\n", self);
-
         rwlock_unlock_wr(&data->lock);
 
         // Update statistics
@@ -222,7 +231,9 @@ static void writer(struct data* data)
 
 int main()
 {
-    size_t num_workers = NUM_READERS + NUM_WRITERS;
+    uint32_t num_readers = NUM_READERS;
+    uint32_t num_writers = NUM_WRITERS;
+    uint32_t num_workers = num_readers + num_writers;
 
     struct data* data = malloc(sizeof(struct data) + sizeof(struct stats) * num_workers);
     if (data == NULL) {
@@ -238,16 +249,21 @@ int main()
     data->num_threads = num_workers;
 
     // Start worker threads
+    // By starting readers first, we should avoid readers waiting for the initial
+    // write locking phase.
     uint32_t i;
-    for (i = 0; i < NUM_WRITERS; ++i) {
-        int err = pthread_create(&data->stats[i].thread, NULL, (void *(*)(void*)) writer, data);
+    for (i = 0; i < num_readers; ++i) {
+        int err = pthread_create(&data->stats[i].thread, NULL, (void *(*)(void*)) reader, data);
         if (err != 0) {
             fprintf(stderr, "Failed to start worker thread: %s\n", strerror(err));
             abort();
         }
     }
+
+    pretend_to_work(data->write_sleep);
+
     for (; i < num_workers; ++i) {
-        int err = pthread_create(&data->stats[i].thread, NULL, (void *(*)(void*)) reader, data);
+        int err = pthread_create(&data->stats[i].thread, NULL, (void *(*)(void*)) writer, data);
         if (err != 0) {
             fprintf(stderr, "Failed to start worker thread: %s\n", strerror(err));
             abort();
@@ -259,7 +275,7 @@ int main()
         pthread_join(data->stats[i].thread, NULL);
     }
 
-    show_statistics(data->stats, NUM_WRITERS, NUM_READERS);
+    show_statistics(data->stats, num_writers, num_readers);
 
     rwlock_uninit(&data->lock);
     free(data);
