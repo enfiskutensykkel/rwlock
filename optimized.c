@@ -5,6 +5,9 @@
 #include "rwlock.h"
 #include "optimized.h"
 
+#define SIZE    512
+#define STRIDE  128 // SIZE / sizeof(int)
+
 
 enum reader_states
 {
@@ -26,7 +29,7 @@ void rwlock_init(rwlock_t* lock, uint32_t num_threads)
     // FIXME: Should check error codes
     pthread_mutex_init(&lock->lock, NULL);
     lock->num_threads = num_threads;
-    lock->reader_states = calloc(num_threads, sizeof(int));
+    lock->reader_states = calloc(num_threads, SIZE);
     
     for (uint32_t i = 0; i < num_threads; ++i) {
         lock->reader_states[i] = READER_INACTIVE;
@@ -46,7 +49,7 @@ void rwlock_uninit(rwlock_t* lock)
 void rwlock_lock_rd(rwlock_t* lock, uint32_t thread)
 {
     // Indicate that we are attempting to take the lock
-    lock->reader_states[thread] = READER_TAKING;
+    lock->reader_states[thread * STRIDE] = READER_TAKING;
 
     pthread_mutex_lock(&lock->lock);
     if (lock->writer_flag == WRITE_LOCK_LOCKED) {
@@ -56,7 +59,7 @@ void rwlock_lock_rd(rwlock_t* lock, uint32_t thread)
 
             // Write-lock was taken, we need to yield
             pthread_mutex_unlock(&lock->lock); // Lock first, allowing for others to take the lock
-            lock->reader_states[thread] = READER_WAITING;
+            lock->reader_states[thread * STRIDE] = READER_WAITING;
 
             // Microoptimization for test-test and set, there is no need trying again
             // if we haven't seen a change in the flag
@@ -69,14 +72,14 @@ void rwlock_lock_rd(rwlock_t* lock, uint32_t thread)
             }
 
             // Indicate that we are trying to take lock again
-            lock->reader_states[thread] = READER_TAKING;
+            lock->reader_states[thread * STRIDE] = READER_TAKING;
             pthread_mutex_lock(&lock->lock);
         }
     }
     pthread_mutex_unlock(&lock->lock);
 
     // We got the lock
-    lock->reader_states[thread] = READER_ACTIVE;
+    lock->reader_states[thread * STRIDE] = READER_ACTIVE;
 }
 
 
@@ -106,7 +109,7 @@ void rwlock_lock_wr(rwlock_t* lock)
 
         // Check if any readers think they have the lock or is about to take the lock
         for (i = 0; i < lock->num_threads; ++i) {
-            if (lock->reader_states[i] == READER_TAKING || lock->reader_states[i] == READER_ACTIVE) {
+            if (lock->reader_states[i * STRIDE] == READER_TAKING || lock->reader_states[i * STRIDE] == READER_ACTIVE) {
                 break;
             }
         }
@@ -130,7 +133,7 @@ void rwlock_lock_wr(rwlock_t* lock)
 void rwlock_unlock_rd(rwlock_t* lock, uint32_t thread)
 {
     // Indicate that we are no longer interested in the read-lock
-    lock->reader_states[thread] = READER_INACTIVE;
+    lock->reader_states[thread * STRIDE] = READER_INACTIVE;
 }
 
 
