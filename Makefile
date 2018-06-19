@@ -3,13 +3,13 @@
 TEST_FOR_CORRECTNESS := 1
 
 # Default values
-DEFS := NUM_WRITERS=1 NUM_READERS=64 SLEEP_READ=100 SLEEP_WRITE=100000 NUM_UPDATES=10000 CORRECTNESS=$(TEST_FOR_CORRECTNESS)
+DEFS := NUM_WRITERS=4 NUM_READERS=256 SLEEP_READ=100 SLEEP_WRITE=100000 NUM_UPDATES=10000 CORRECTNESS=$(TEST_FOR_CORRECTNESS)
 
 CC := gcc
 CFLAGS := -std=gnu99 -Wall -Wextra -Wno-unused-parameter
 
 
-.PHONY: wrpref optimized posix all clean distclean debug release
+.PHONY: wrpref optimized posix all clean debug release
 
 all: optimized posix wrpref
 
@@ -21,8 +21,6 @@ release: all
 
 clean:
 	-$(RM) wrpref.o posix.o optimized.o wrpref_test.o posix_test.o optimized_test.o
-
-distclean: clean
 	-$(RM) wrpref_test posix_test optimized_test
 
 optimized: optimized_test

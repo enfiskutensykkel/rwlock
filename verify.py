@@ -15,6 +15,8 @@ if len(sys.argv) != 2:
     print >> sys.stderr, "Usage: {} <filename>".format(sys.argv[0])
     sys.exit(1)
 
+writers = set()
+readers = set()
 
 all_read_times = []
 with open(sys.argv[1]) as fp:
@@ -37,6 +39,9 @@ with open(sys.argv[1]) as fp:
             if thread_take != thread_release:
                 raise "Write lock not released by same thread"
 
+            writers.add(thread_take)
+            writers.add(thread_release)
+
         elif n:
             m = writer_acquire.match(lines[i - 1])
 
@@ -49,13 +54,22 @@ with open(sys.argv[1]) as fp:
             if thread_take != thread_release:
                 raise "Write lock not released by same thread"
 
+            writers.add(thread_take)
+            writers.add(thread_release)
+
         elif e:
             thread = int(e.group('thread'))
             elapsed = int(e.group('time'))
 
+            readers.add(thread)
+
             all_read_times.append(elapsed)
 
 reads = np.array(all_read_times)
+
+
+print "Reader threads:", len(readers)
+print "Writer threads:", len(writers)
 
 print "min :", "%14.3f" % np.min(reads)
 for percentile in [.5, .25, .50, .75, .90, .95, .97, .99]:
