@@ -52,12 +52,11 @@ void rwlock_lock_rd(rwlock_t* lock, uint32_t thread)
     // Indicate that we are attempting to take the lock
     lock->reader_states[thread * STRIDE] = READER_TAKING;
 
+    // Microoptimization as starting a while loop has a bigger overhead
+    // than a simple if-check
     pthread_mutex_lock(&lock->lock);
     if (lock->writer_lock == WRITE_LOCK_LOCKED) {
-        // Microoptimization as starting a while loop has a bigger overhead
-        // than a simple if-check
-        while (lock->writer_lock == WRITE_LOCK_LOCKED) {
-
+        do {
             // Write-lock was taken, we need to yield
             // Unlock first, allowing for others to take the lock
             pthread_mutex_unlock(&lock->lock); 
@@ -71,9 +70,8 @@ void rwlock_lock_rd(rwlock_t* lock, uint32_t thread)
 
             // Indicate that we are trying to take lock again
             lock->reader_states[thread * STRIDE] = READER_TAKING;
-
             pthread_mutex_lock(&lock->lock);
-        }
+        } while (lock->writer_lock == WRITE_LOCK_LOCKED);
     }
     pthread_mutex_unlock(&lock->lock);
 
@@ -114,9 +112,8 @@ void rwlock_lock_wr(rwlock_t* lock)
         if (i == lock->num_threads) {
             break;
         }
-        else {
-            sched_yield();
-        }
+        
+        sched_yield();
     }
 }
 
