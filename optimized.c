@@ -5,8 +5,8 @@
 #include "rwlock.h"
 #include "optimized.h"
 
-#define SIZE    512
-#define STRIDE  128 // SIZE / sizeof(int)
+#define SIZE    128
+#define STRIDE  32 // SIZE / sizeof(int)
 
 
 enum reader_states
@@ -27,7 +27,11 @@ enum writer_lock_states
 void rwlock_init(rwlock_t* lock, uint32_t num_threads)
 {
     // FIXME: Should check error codes
+#ifdef __APPLE__
     pthread_mutex_init(&lock->lock, NULL);
+#else
+    pthread_spin_init(&lock->lock, PTHREAD_PROCESS_PRIVATE);
+#endif
     lock->num_threads = num_threads;
     lock->reader_states = calloc(num_threads, SIZE);
     
@@ -41,7 +45,11 @@ void rwlock_init(rwlock_t* lock, uint32_t num_threads)
 
 void rwlock_uninit(rwlock_t* lock)
 {
+#ifdef __APPLE__
     pthread_mutex_destroy(&lock->lock);
+#else
+    pthread_spin_destroy(&lock->lock);
+#endif
     free((void*) lock->reader_states);
 }
 
@@ -51,14 +59,23 @@ void rwlock_lock_rd(rwlock_t* lock, uint32_t thread)
     // Indicate that we are attempting to take the lock
     lock->reader_states[thread * STRIDE] = READER_TAKING;
 
+#ifdef __APPLE__
     pthread_mutex_lock(&lock->lock);
+#else
+    pthread_spin_lock(&lock->lock);
+#endif
     if (lock->writer_flag == WRITE_LOCK_LOCKED) {
         // Microoptimization as starting a while loop has a bigger overhead
         // than a simple if-check
         while (lock->writer_flag == WRITE_LOCK_LOCKED) {
 
             // Write-lock was taken, we need to yield
-            pthread_mutex_unlock(&lock->lock); // Lock first, allowing for others to take the lock
+            // Unlock first, allowing for others to take the lock
+#ifdef __APPLE__
+            pthread_mutex_unlock(&lock->lock); 
+#else
+            pthread_spin_unlock(&lock->lock);
+#endif
             lock->reader_states[thread * STRIDE] = READER_WAITING;
 
             // Microoptimization for test-test and set, there is no need trying again
@@ -73,10 +90,19 @@ void rwlock_lock_rd(rwlock_t* lock, uint32_t thread)
 
             // Indicate that we are trying to take lock again
             lock->reader_states[thread * STRIDE] = READER_TAKING;
+
+#ifdef __APPLE__
             pthread_mutex_lock(&lock->lock);
+#else
+            pthread_spin_lock(&lock->lock);
+#endif
         }
     }
+#ifdef __APPLE__
     pthread_mutex_unlock(&lock->lock);
+#else
+    pthread_spin_unlock(&lock->lock);
+#endif
 
     // We got the lock
     lock->reader_states[thread * STRIDE] = READER_ACTIVE;
@@ -86,22 +112,34 @@ void rwlock_lock_rd(rwlock_t* lock, uint32_t thread)
 void rwlock_lock_wr(rwlock_t* lock)
 {
     // Try to take write-lock, if not already taken
+#ifdef __APPLE__
     pthread_mutex_lock(&lock->lock);
     while (lock->writer_flag == WRITE_LOCK_LOCKED) {
         pthread_mutex_unlock(&lock->lock);
 
-#ifdef __APPLE__
-                sched_yield();
-#else
-                pthread_yield();
-#endif
+        sched_yield();
 
         pthread_mutex_lock(&lock->lock);
     }
+#else 
+    pthread_spin_lock(&lock->lock);
+    while (lock->writer_flag == WRITE_LOCK_LOCKED) {
+        pthread_spin_unlock(&lock->lock);
+
+        pthread_yield();
+
+        pthread_spin_lock(&lock->lock);
+    }
+#endif
     
     // Take the write-lock
     lock->writer_flag = WRITE_LOCK_LOCKED;
+
+#ifdef __APPLE__
     pthread_mutex_unlock(&lock->lock);
+#else
+    pthread_spin_unlock(&lock->lock);
+#endif
 
     // Now we need to wait for existing readers to complete
     while (1) {
